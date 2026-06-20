@@ -1,13 +1,21 @@
 package com.example.myapplication.http_api
 
+
+import com.example.myapplication.viewmodels.AuthViewModel
 import com.example.myapplication.viewmodels.MovieDetailViewModel
 import com.example.myapplication.viewmodels.MovieViewModel
+import com.example.myapplication.viewmodels.ProfileViewModel
 import de.jensklingenberg.ktorfit.Ktorfit
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.DefaultRequest
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.header
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import org.koin.core.module.dsl.viewModel
 import org.koin.dsl.module
+import kotlinx.coroutines.launch
+
 
 
 val networkModule = module {
@@ -41,17 +49,33 @@ val networkModule = module {
     single {
         get<Ktorfit>().create<MovieApiService>()
     }
+
+    single {
+        get<Ktorfit>().create<AuthApiService>()
+    }
 }
 val repositoryModule = module {
     single { MovieRepository(get()) }
+    single { AuthRepository(get()) }
 }
 
 val viewModelModule = module {
-    factory { MovieViewModel(get()) }
+    //factory { MovieViewModel(get()) }
+    viewModel { MovieViewModel(get()) }
 }
 
 val detailviewModelModule = module {
-    factory { MovieDetailViewModel(get(), "") }
+    //factory { (id: String) -> MovieDetailViewModel(get(), id) }
+    viewModel { (id: String) -> MovieDetailViewModel(get(), id) }
 }
 
-val appModules = listOf(networkModule, repositoryModule, viewModelModule, detailviewModelModule)
+val authviewModelModule = module {
+    viewModel { AuthViewModel(get(), get()) }
+}
+
+val profileviewModelModule = module {
+    viewModel { ProfileViewModel(get(),get()) }
+}
+
+
+val appModules = listOf(networkModule, repositoryModule, viewModelModule, detailviewModelModule, authviewModelModule, profileviewModelModule)

@@ -2,10 +2,8 @@
 
 package com.example.myapplication.screens
 import org.koin.compose.viewmodel.koinViewModel
-
-
-
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -33,12 +32,16 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -51,17 +54,81 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import coil3.compose.LocalPlatformContext
 import coil3.request.ImageRequest
 import com.example.myapplication.viewmodels.Movie
 import com.example.myapplication.viewmodels.MovieUIState
 import com.example.myapplication.viewmodels.MovieViewModel
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import coil3.ImageLoader
+import coil3.compose.setSingletonImageLoaderFactory
+import coil3.memory.MemoryCache
+import com.example.myapplication.token.TokenManager
+import com.example.myapplication.viewmodels.MovieDetailViewModel
+import com.example.myapplication.viewmodels.ProfileViewModel
+import com.example.myapplication.viewmodels.UIEvent
+import org.koin.compose.koinInject
+import org.koin.core.parameter.parametersOf
+
 
 @Composable
-@Preview
-fun App(viewModel: MovieViewModel = koinViewModel() ) {
+fun App() {
+    val navController = rememberNavController()
+
+    setSingletonImageLoaderFactory { context ->
+        ImageLoader.Builder(context)
+            .memoryCache {
+                MemoryCache.Builder()
+                    .maxSizePercent(context, 0.25)
+                    .strongReferencesEnabled(true)
+                    .build()
+            }
+            .build()
+    }
+
+    MaterialTheme(colorScheme = darkColorScheme()) {
+        val tokenManager: TokenManager = koinInject()
+        val token by tokenManager.token.collectAsState(initial = null)
+        val startRoute = if (token == null) "auth" else "list"
+        NavHost(navController = navController, startRoute) {
+            composable(Screen.List.route) {
+                val viewModel: MovieViewModel = koinViewModel()
+                MovieListScreen(
+                    viewModel = viewModel,
+                    onMovieClick = { movie -> navController.navigate(Screen.Details.createRoute(movie.imdbId)) },
+                    onProfileClick = {navController.navigate(Screen.Profile.route)}
+                )
+            }
+            composable(
+                route = Screen.Details.route,
+                arguments = listOf(navArgument("movieId") { type = NavType.StringType })
+            ) { backStackEntry ->
+                val movieId = backStackEntry.arguments?.getString("movieId") ?: ""
+                // Pass movieId to koin to get the specific ViewModel
+                val viewModel: MovieDetailViewModel = koinViewModel { parametersOf(movieId) }
+                DetailScreen(viewModel, onBack = { navController.popBackStack() })
+            }
+            composable(Screen.Profile.route){
+                val viewModel: ProfileViewModel = koinViewModel()
+                ProfileScreen(viewModel = viewModel, { navController.popBackStack() })
+            }
+            composable(Screen.Auth.route){
+                AuthLandingScreen()
+            }
+        }
+    }
+}
+@Composable
+fun MovieListScreen(viewModel: MovieViewModel = koinViewModel(), onMovieClick: (Movie) -> Unit, onProfileClick: () -> Unit) {
     val uiState by viewModel.state.collectAsState()
+    val eventPublisher = viewModel::setEvent
     MaterialTheme (
         colorScheme = darkColorScheme()
     ) {
@@ -75,6 +142,11 @@ fun App(viewModel: MovieViewModel = koinViewModel() ) {
                     }
                 )
             },
+            bottomBar = {
+                if(!isInFilterMode) {
+                    MovieBottomBar(onProfileClick)
+                }
+            },
             content = { paddingValues ->
                 if (isInFilterMode) {
                     FilterOverlay(
@@ -82,10 +154,11 @@ fun App(viewModel: MovieViewModel = koinViewModel() ) {
                             isInFilterMode = !isInFilterMode
                         },
                         paddingValues = paddingValues,
-                        viewModel = viewModel
+                        viewModel = viewModel,
+                        eventPublisher
                     )
                 } else {
-                    MovieResults(uiState, paddingValues,viewModel)
+                    MovieResults(uiState, paddingValues, viewModel, onMovieClick, eventPublisher)
                 }
             }
         )
@@ -96,7 +169,9 @@ fun App(viewModel: MovieViewModel = koinViewModel() ) {
 fun MovieResults(
     uiState: MovieUIState,
     paddingValues: PaddingValues,
-    viewModel: MovieViewModel
+    viewModel: MovieViewModel,
+    onMovieClick: (Movie) -> Unit,
+    eventPublisher: (UIEvent) -> Unit
 ) {
     Column(modifier = Modifier
         .fillMaxSize()
@@ -105,8 +180,10 @@ fun MovieResults(
             uiState.totalCount,
             viewModel.filter.sortBy,
             onSortSelected = { newSort ->
-                viewModel.updateSort(newSort)
+                //viewModel.updateSort(newSort)
+                eventPublisher(UIEvent.UpdateSort(newSort))
             }
+
         )
 
         if (uiState.loading) {
@@ -140,7 +217,12 @@ fun MovieResults(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(uiState.result) { movie ->
-                    MovieItem(movie)
+                    MovieItem(
+                        movie,
+                        onMovieClick = {
+                            onMovieClick(movie)
+                        }
+                    )
                 }
             }
         }
@@ -148,9 +230,11 @@ fun MovieResults(
 }
 
 @Composable
-fun MovieItem(movie: Movie) {
+fun MovieItem(movie: Movie, onMovieClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable{ onMovieClick() },
         shape = RoundedCornerShape(12.dp),
     ) {
         Row(
@@ -202,7 +286,7 @@ fun MovieItem(movie: Movie) {
 fun ResultsHeader(
     totalCount: Int,
     currentSortLabel: String,
-    onSortSelected: (String) -> Unit
+    onSortSelected: (String) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
     val options = listOf("Rating", "Year", "Title", "Popularity")
@@ -256,7 +340,8 @@ fun ResultsHeader(
 fun FilterOverlay(
     onButtonClick: () -> Unit,
     paddingValues: PaddingValues,
-    viewModel: MovieViewModel
+    viewModel: MovieViewModel,
+    eventPublisher: (UIEvent) -> Unit
 ) {
     var editingFilters by remember(viewModel.filter) {
         mutableStateOf(viewModel.filter)
@@ -362,7 +447,9 @@ fun FilterOverlay(
         Button(
             onClick = {
                 onButtonClick()
-                viewModel.applyFilters(editingFilters)
+                eventPublisher(UIEvent.ApplyFilters(editingFilters))
+                //viewModel.setEvent()
+                //viewModel.applyFilters(editingFilters)
             },
             modifier = Modifier.fillMaxWidth()
         ) {
@@ -411,3 +498,61 @@ fun TopMoviesAppBar(
         }
     )
 }
+@Composable
+fun MovieBottomBar(onProfileClick: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp,
+        modifier = Modifier.height(80.dp).fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable {onProfileClick()},
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("👤", fontSize = 22.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("Profile", style = MaterialTheme.typography.labelMedium)
+            }
+
+            VerticalDivider(
+                modifier = Modifier
+                    .padding(vertical = 8.dp)
+                    .width(1.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .clickable { },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text("🎮", fontSize = 22.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("Start Quiz", style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    }
+}
+
+sealed class Screen(val route: String) {
+    object List : Screen("list")
+    object Details : Screen("details/{movieId}") {
+        fun createRoute(movieId: String) = "details/$movieId"
+    }
+    object Profile : Screen("profile")
+
+    object Auth : Screen("auth")
+}
+
+

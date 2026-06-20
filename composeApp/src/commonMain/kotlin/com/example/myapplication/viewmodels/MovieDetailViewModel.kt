@@ -25,13 +25,17 @@ class MovieDetailViewModel(
     private fun loadDetails() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true) }
-            val detailsdeferred = async { repository.getMovieDetails(movieId)}
-            val imagesdeferred = async { repository.getMovieImages(movieId)}
-            val castdeferred = async { repository.getMovieCast(movieId)}
+//            val detailsdeferred = async { repository.getMovieDetails(movieId)}
+//            val imagesdeferred = async { repository.getMovieImages(movieId)}
+//            val castdeferred = async { repository.getMovieCast(movieId)}
+//
+//            val details = detailsdeferred.await()
+//            val images = imagesdeferred.await()
+//            val cast = castdeferred.await()
 
-            val details = detailsdeferred.await()
-            val images = imagesdeferred.await()
-            val cast = castdeferred.await()
+            val details = repository.getMovieDetails(movieId)
+            val images = repository.getMovieImages(movieId)
+            val cast = repository.getMovieCast(movieId)
 
             _state.update {it.copy(
                 isLoading = false,
@@ -70,9 +74,9 @@ data class MovieDetails(
 data class PersonSummary(
     val imdbId: String,
     val name: String,
-    val professions: String?,
-    val department: String?,
-    val profilePath: String?
+    val professions: String? = null,
+    val department: String? = null,
+    val profilePath: String? = null
 )
 
 @Serializable

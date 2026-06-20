@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication.http_api.MovieRepository
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,15 +24,32 @@ class MovieViewModel(private val repository: MovieRepository) : ViewModel() {
 
     var filter by mutableStateOf(FilterState())
 
-    init {
+    private val events = MutableSharedFlow<UIEvent>()
+
+    fun setEvent(event: UIEvent) {
+        viewModelScope.launch { events.emit(event) }
+    }
+    private fun observeEvents() {
         viewModelScope.launch {
-            _state.update { it.copy(loading = true, error = null) }
-            delay(1.seconds)
-            applyFilters(FilterState("","",null,null,0f, "Rating"))
+            events.collect { event ->
+                when (event) {
+                    is UIEvent.UpdateSort -> {
+                        updateSort(event.sortBy)
+                    }
+                    is UIEvent.ApplyFilters -> {
+                        applyFilters(event.newFilters)
+                    }
+                }
+            }
         }
     }
-    fun applyFilters(newFilters: FilterState) {
+    private fun applyFilters(newFilters: FilterState) {
         filter = newFilters
+        loadMovies()
+    }
+
+    private fun updateSort(newSort: String) {
+        filter = filter.copy(sortBy = newSort)
         loadMovies()
     }
 
@@ -71,6 +89,15 @@ class MovieViewModel(private val repository: MovieRepository) : ViewModel() {
             }
         }
     }
+
+    init {
+        observeEvents()
+        viewModelScope.launch {
+            _state.update { it.copy(loading = true, error = null) }
+            delay(1.seconds)
+            applyFilters(FilterState("","",null,null,0f, "Rating"))
+        }
+    }
     val genres = listOf(
         "Action", "Adventure", "Animation", "Comedy", "Crime",
         "Drama", "Family", "Fantasy", "History", "Horror",
@@ -97,10 +124,7 @@ class MovieViewModel(private val repository: MovieRepository) : ViewModel() {
         "War" to 10752,
         "Western" to 37
     )
-    fun updateSort(newSort: String) {
-        filter = filter.copy(sortBy = newSort)
-        loadMovies()
-    }
+
 }
 
 
@@ -130,6 +154,11 @@ data class MovieUIState(
     val error: Throwable? = null,
     val totalCount: Int = 0
 )
+
+sealed class UIEvent {
+    data class UpdateSort(val sortBy: String) : UIEvent()
+    data class ApplyFilters(val newFilters: FilterState) : UIEvent()
+}
 
 @Serializable
 data class PaginatedResponse<T>(
